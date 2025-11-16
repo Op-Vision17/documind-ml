@@ -1,0 +1,43 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+env/
+
+# Local environment variables
+.env
+*.env
+
+# VSCode settings
+.vscode/
+
+# Mac / Windows junk (optional but safe)
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.log
+*.tmp
+tmp/
+temp/
+
+# Model weights (if any)
+*.bin
+*.pt
+*.ckpt
+
+# PDFs downloaded for processing
+*.pdf
+
+# Uvicorn reload files
+*.pid
+
+# PyCharm
+.idea/
+
+# Any temp folders used
+cache/
