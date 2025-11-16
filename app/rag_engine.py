@@ -5,7 +5,6 @@ from groq import Groq
 from pinecone import Pinecone
 from .pdf_utils import extract_pdf_text
 from .chunker import chunk_text
-from .embedder import Embedder
 from .utils import notify_node_update
 
 # Import configuration (this loads .env first)
@@ -24,58 +23,34 @@ from .config import (
 client = Groq(api_key=GROQ_API_KEY)
 
 # -----------------------------
-# INITIALIZE EMBEDDER
+# LAZY LOAD EMBEDDER (Saves ~200MB memory at startup)
 # -----------------------------
-embedder = Embedder(EMBEDDING_MODEL)
+_embedder = None
+
+def get_embedder():
+    """Lazy load embedder to save memory on startup"""
+    global _embedder
+    if _embedder is None:
+        print("🔄 Loading embedding model (this may take a moment)...")
+        from .embedder import Embedder
+        _embedder = Embedder(EMBEDDING_MODEL)
+        print("✅ Embedding model loaded successfully")
+    return _embedder
 
 # -----------------------------
-# INITIALIZE NEW PINECONE CLIENT
+# INITIALIZE PINECONE CLIENT
 # -----------------------------
 pc = Pinecone(api_key=PINECONE_API_KEY)
 
-# Create index if missing
-index_names = [idx["name"] for idx in pc.list_indexes()]
-
-if PINECONE_INDEX not in index_names:
-    print(f"Creating Pinecone index: {PINECONE_INDEX}")
-    dim = embedder.embed_query("hello world").shape[0]
-    
-    # Try creating index with free tier compatible settings
-    try:
-        from pinecone import ServerlessSpec
-        # Use Serverless with free tier compatible region
-        # Free tier supports: us-east-1 (AWS)
-        pc.create_index(
-            name=PINECONE_INDEX,
-            dimension=dim,
-            metric="cosine",
-            spec=ServerlessSpec(
-                cloud="aws",
-                region="us-east-1"  # Free tier compatible region
-            )
-        )
-        print(f"✅ Serverless index {PINECONE_INDEX} created successfully")
-    except Exception as e:
-        print(f"⚠️ Failed to create serverless index: {e}")
-        print("Attempting to create with GCP starter...")
-        try:
-            from pinecone import PodSpec
-            # Fallback to pod-based (GCP starter for free tier)
-            pc.create_index(
-                name=PINECONE_INDEX,
-                dimension=dim,
-                metric="cosine",
-                spec=PodSpec(
-                    environment="gcp-starter",
-                    pod_type="starter"
-                )
-            )
-            print(f"✅ Pod-based index {PINECONE_INDEX} created successfully")
-        except Exception as pod_error:
-            print(f"❌ Failed to create index: {pod_error}")
-            raise
-else:
-    print(f"✅ Index {PINECONE_INDEX} already exists")
+# Check index exists (don't create at startup to save time/memory)
+try:
+    index_names = [idx["name"] for idx in pc.list_indexes()]
+    if PINECONE_INDEX in index_names:
+        print(f"✅ Index {PINECONE_INDEX} already exists")
+    else:
+        print(f"⚠️ Index {PINECONE_INDEX} not found. It will be created on first use.")
+except Exception as e:
+    print(f"⚠️ Could not check Pinecone indexes: {e}")
 
 index = pc.Index(PINECONE_INDEX)
 
@@ -111,7 +86,8 @@ def process_ingest(fileId, fileUrl, originalName):
         # 3. Chunk text
         chunks = chunk_text(text, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
 
-        # 4. Embed chunks
+        # 4. Embed chunks (lazy load embedder here)
+        embedder = get_embedder()
         vectors = embedder.embed_documents(chunks)
 
         # 5. Upsert to Pinecone
@@ -156,7 +132,8 @@ def process_answer(query, top_k=4):
     try:
         print(f"🔍 Processing query: {query}")
         
-        # 1. Embed query
+        # 1. Embed query (lazy load embedder here)
+        embedder = get_embedder()
         qvec = embedder.embed_query(query).tolist()
 
         # 2. Search Pinecone
@@ -256,7 +233,7 @@ Please provide a well-formatted answer:"""
 
         # Call Groq API
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",  # Updated to latest stable model
+            model="llama-3.3-70b-versatile",
             messages=[
                 {
                     "role": "system",
@@ -283,13 +260,11 @@ Please provide a well-formatted answer:"""
     except Exception as e:
         print(f"❌ Error generating LLM answer: {e}")
         print(f"Error type: {type(e).__name__}")
-        # Return formatted fallback
         return format_fallback_answer(context, query)
 
 
 def format_fallback_answer(context, query):
     """Format a fallback answer when LLM fails"""
-    # Take first 500 characters of most relevant context
     summary = context[:500] + "..." if len(context) > 500 else context
     
     return f"""**Answer to: {query}**

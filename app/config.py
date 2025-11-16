@@ -24,7 +24,8 @@ NODE_SERVICE_TOKEN = os.getenv("NODE_SERVICE_TOKEN")
 
 # ML service configuration
 ML_HOST = os.getenv("ML_HOST", "0.0.0.0")
-ML_PORT = int(os.getenv("ML_PORT", 8000))
+# Use Render's PORT variable (fallback to ML_PORT for local dev)
+ML_PORT = int(os.getenv("PORT", os.getenv("ML_PORT", 8000)))
 
 # Embedding configuration
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
